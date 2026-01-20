@@ -1,0 +1,25 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# virtual env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# logs
+logs
+
+# Dataset (不要上传)
+data/
+meta/
+.env/
+# Model checkpoints (不要上传)
+checkpoints/
+external/
+# External heavy outputs
+external/RePaint-main/results/
+external/RePaint-main/logs/

@@ -1,0 +1,16 @@
+pip install -r requirements.txt# 深度学习框架
+torch>=2.0.0
+torchvision>=0.15.0
+
+# 图像处理
+opencv-python>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# Segment Anything Model
+git+https://github.com/facebookresearch/segment-anything.git
+
+# 其他工具
+matplotlib>=3.7.0
+tqdm>=4.65.0
+

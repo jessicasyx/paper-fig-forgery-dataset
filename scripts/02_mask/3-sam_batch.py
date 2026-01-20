@@ -81,6 +81,53 @@ def initialize_sam_model(checkpoint_path: str, model_type: str = 'vit_b',
     return mask_generator, device
 
 
+def select_best_mask(masks: List[Dict], image_area: int) -> Optional[Dict]:
+    """
+    智能选择最佳掩码
+    
+    选择策略（按优先级）：
+    1. 优先选择面积占比在 10%-30% 之间的掩码（最优）
+    2. 如果没有，选择面积占比在 5%-40% 之间的掩码
+    3. 如果还没有，选择面积第二大的掩码
+    4. 如果只有一个掩码，选择面积最大的
+    
+    参数:
+        masks: SAM 生成的掩码列表
+        image_area: 图像总面积（像素数）
+    
+    返回:
+        best_mask: 最佳掩码，如果没有则返回 None
+    """
+    if len(masks) == 0:
+        return None
+    
+    # 计算每个掩码的面积占比
+    for mask in masks:
+        mask['area_ratio'] = mask['area'] / image_area
+    
+    # 策略1: 优先选择面积占比在 10%-30% 之间的掩码
+    optimal_masks = [m for m in masks if 0.10 <= m['area_ratio'] <= 0.30]
+    if optimal_masks:
+        # 选择最接近 20% 的掩码
+        best_mask = min(optimal_masks, key=lambda m: abs(m['area_ratio'] - 0.20))
+        return best_mask
+    
+    # 策略2: 选择面积占比在 5%-40% 之间的掩码
+    acceptable_masks = [m for m in masks if 0.05 <= m['area_ratio'] <= 0.40]
+    if acceptable_masks:
+        # 选择最接近 20% 的掩码
+        best_mask = min(acceptable_masks, key=lambda m: abs(m['area_ratio'] - 0.20))
+        return best_mask
+    
+    # 策略3: 选择面积第二大的掩码
+    if len(masks) >= 2:
+        sorted_masks = sorted(masks, key=lambda m: m['area'], reverse=True)
+        return sorted_masks[1]
+    
+    # 策略4: 只有一个掩码，选择面积最大的
+    return max(masks, key=lambda m: m['area'])
+
+
 def process_single_image(image_path: str, mask_generator: SamAutomaticMaskGenerator,
                         output_path: str, device: str = "cuda:0",
                         max_image_size: int = 800, resize_enabled: bool = True,
@@ -107,10 +154,19 @@ def process_single_image(image_path: str, mask_generator: SamAutomaticMaskGenera
             image_bgr = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
         
         if image_bgr is None:
-            return False, "无法读取图片"
+            # 无法读取图片，生成全黑掩码
+            roi_mask = np.zeros((100, 100), dtype=np.uint8)
+            if not invert_mask:
+                roi_mask = 255 - roi_mask
+            success, encoded_image = cv2.imencode('.png', roi_mask)
+            if success:
+                with open(output_path, 'wb') as f:
+                    f.write(encoded_image.tobytes())
+            return True, "无法读取图片，生成全黑掩码"
         
         # 获取原始尺寸
         original_height, original_width = image_bgr.shape[:2]
+        original_area = original_height * original_width
         
         # 如果启用缩放且图像过大，则缩小图像
         if resize_enabled:
@@ -127,17 +183,35 @@ def process_single_image(image_path: str, mask_generator: SamAutomaticMaskGenera
         # 生成掩码
         masks = mask_generator.generate(image_rgb)
         
+        # 如果未生成任何掩码，生成全黑掩码
         if len(masks) == 0:
-            return False, "未生成任何掩码"
+            roi_mask = np.zeros((original_height, original_width), dtype=np.uint8)
+            if not invert_mask:
+                roi_mask = 255 - roi_mask
+            success, encoded_image = cv2.imencode('.png', roi_mask)
+            if success:
+                with open(output_path, 'wb') as f:
+                    f.write(encoded_image.tobytes())
+            return True, "未生成掩码，生成全黑掩码"
         
-        # 选择面积第二大的掩码
-        if len(masks) < 2:
-            # 如果只有一个mask，退而求其次选择面积最大的
-            roi = max(masks, key=lambda m: m["area"])
-        else:
-            sorted_masks = sorted(masks, key=lambda m: m["area"], reverse=True)
-            roi = sorted_masks[1]
-        roi_mask = (roi["segmentation"].astype(np.uint8) * 255)
+        # 智能选择最佳掩码
+        current_area = image_rgb.shape[0] * image_rgb.shape[1]
+        best_mask = select_best_mask(masks, current_area)
+        
+        if best_mask is None:
+            # 如果选择失败，生成全黑掩码
+            roi_mask = np.zeros((original_height, original_width), dtype=np.uint8)
+            if not invert_mask:
+                roi_mask = 255 - roi_mask
+            success, encoded_image = cv2.imencode('.png', roi_mask)
+            if success:
+                with open(output_path, 'wb') as f:
+                    f.write(encoded_image.tobytes())
+            return True, "掩码选择失败，生成全黑掩码"
+        
+        # 提取选中的掩码
+        roi_mask = (best_mask["segmentation"].astype(np.uint8) * 255)
+        area_ratio = best_mask.get('area_ratio', 0) * 100
         
         # 如果图像被缩放了，将掩码恢复到原始尺寸
         if resize_enabled and (roi_mask.shape[0] != original_height or roi_mask.shape[1] != original_width):
@@ -152,12 +226,32 @@ def process_single_image(image_path: str, mask_generator: SamAutomaticMaskGenera
         if success:
             with open(output_path, 'wb') as f:
                 f.write(encoded_image.tobytes())
-            return True, f"成功 (生成{len(masks)}个区域)"
+            return True, f"成功 (共{len(masks)}个区域, 选中面积占比{area_ratio:.1f}%)"
         else:
-            return False, "保存失败"
+            # 保存失败，生成全黑掩码
+            roi_mask = np.zeros((original_height, original_width), dtype=np.uint8)
+            if not invert_mask:
+                roi_mask = 255 - roi_mask
+            success, encoded_image = cv2.imencode('.png', roi_mask)
+            if success:
+                with open(output_path, 'wb') as f:
+                    f.write(encoded_image.tobytes())
+            return True, "保存失败，生成全黑掩码"
             
     except Exception as e:
-        return False, str(e)
+        # 发生异常，生成全黑掩码
+        try:
+            roi_mask = np.zeros((original_height if 'original_height' in locals() else 100, 
+                               original_width if 'original_width' in locals() else 100), dtype=np.uint8)
+            if not invert_mask:
+                roi_mask = 255 - roi_mask
+            success, encoded_image = cv2.imencode('.png', roi_mask)
+            if success:
+                with open(output_path, 'wb') as f:
+                    f.write(encoded_image.tobytes())
+            return True, f"处理异常({str(e)})，生成全黑掩码"
+        except:
+            return False, str(e)
     finally:
         # 清理GPU显存（如果使用GPU）
         if device == "cuda:0":

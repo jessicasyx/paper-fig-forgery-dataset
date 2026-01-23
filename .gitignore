@@ -19,7 +19,7 @@ meta/
 .env/
 # Model checkpoints (不要上传)
 checkpoints/
-external/
+
 # External heavy outputs
 external/RePaint-main/results/
 external/RePaint-main/logs/

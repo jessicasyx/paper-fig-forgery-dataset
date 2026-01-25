@@ -127,13 +127,33 @@ def main():
     print(f"mask 缺失数量：{len(missing_masks)}")
     print(f"是否需要生成mask：{need_make_mask}")
 
+        # ---------------------------------------------------------
+    # Step 1：生成 mask（SAM） + 记录跳过
     # ---------------------------------------------------------
-    # Step 1：生成 mask（只生成缺失的）
-    # ---------------------------------------------------------
+    print("\n步骤1：mask 处理（SAM，可选）")
+
+    # ✅ 不管要不要生成，都先取到 model_type（用于meta记录）
+    config = get_default_sam_config()
+    model_type = config["model_type"]
+
+    # ✅ 1) 先把“已存在的mask跳过”全部写入meta（否则永远漏账）
+    if not args.overwrite:
+        for img_path in tqdm(imgs, desc="记录mask跳过", unit="张"):
+            out_mask = os.path.join(mask_dir, img_path.stem + ".png")
+            if os.path.exists(out_mask):
+                sample_id = make_sample_id(img_path, real_dir)
+                write_meta(
+                    sample_id=sample_id,
+                    stage="mask",
+                    status="skip",
+                    type="repaint",
+                    paths={"real": str(img_path), "mask": out_mask},
+                    params={"model_type": model_type}
+                )
+
+    # ✅ 2) 再决定要不要生成缺失的mask
     if need_make_mask:
-        print("\n步骤1：生成 mask（SAM）")
-        config = get_default_sam_config()
-        model_type = config["model_type"]
+        print("\n开始生成缺失 mask（SAM）")
 
         sam_checkpoints = {
             "vit_b": os.path.join(PROJECT_ROOT, "checkpoints", "sam", "sam_vit_b_01ec64.pth"),
@@ -153,12 +173,11 @@ def main():
             sam_params=config.get("sam_params", None),
         )
 
-        ok_cnt, skip_cnt, fail_cnt = 0, 0, 0
+        ok_cnt, fail_cnt = 0, 0
 
         for img_path in tqdm(missing_masks, desc="生成mask", unit="张"):
             out_mask = os.path.join(mask_dir, img_path.stem + ".png")
-            sample_id = make_sample_id(str(img_path))   # ✅ 每张图一个 id
-
+            sample_id = make_sample_id(img_path, real_dir)
 
             ok, msg = run_step_mask_generate(
                 real_path=str(img_path),
@@ -170,44 +189,33 @@ def main():
             )
 
             if ok:
-                if msg == "exists_skip":
-                    skip_cnt += 1
-
-                    # ✅ 记录：mask跳过
-                    write_meta(
-                        sample_id=sample_id,
-                        stage="mask",
-                        status="skip",
-                        type="repaint",
-                        paths={"real": str(img_path), "mask": out_mask},
-                        params={"model_type": model_type}
-                    )
-
-                else:
-                    ok_cnt += 1
-
-                    # ✅ 记录：mask成功
-                    write_meta(
-                        sample_id=sample_id,
-                        stage="mask",
-                        status="success",
-                        type="repaint",
-                        paths={"real": str(img_path), "mask": out_mask},
-                        params={"model_type": model_type}
-                    )
-
+                ok_cnt += 1
+                write_meta(
+                    sample_id=sample_id,
+                    stage="mask",
+                    status="success",
+                    type="repaint",
+                    paths={"real": str(img_path), "mask": out_mask},
+                    params={"model_type": model_type}
+                )
             else:
                 fail_cnt += 1
                 tqdm.write(f"生成mask失败：{img_path.name} | {msg}")
 
-                # ❌ 记录：mask失败
                 write_failed(
                     sample_id=sample_id,
                     stage="mask",
                     reason=str(msg),
+                    type="repaint",
                     paths={"real": str(img_path), "mask_out": out_mask},
                     params={"model_type": model_type}
                 )
+
+        print(f"mask 生成完成：新生成 {ok_cnt}，失败 {fail_cnt}")
+
+    else:
+        print("\n步骤1：跳过 mask 生成（mask 已齐全）")
+
     # ---------------------------------------------------------
     # Step 2：生成 corrupted（挖洞图）
     # ---------------------------------------------------------
@@ -223,7 +231,7 @@ def main():
         mask_path = os.path.join(mask_dir, name)  # 注意：mask 文件名与你 real 保持一致
         out_path = os.path.join(corrupted_dir, name)
         # ✅ 每张图一个 sample_id
-        sample_id = make_sample_id(real_path)
+        sample_id = make_sample_id(img_path, real_dir)
 
         ok, msg = run_step_corrupted(
         real_path=real_path,

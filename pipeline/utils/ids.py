@@ -1,11 +1,20 @@
 import hashlib
+from pathlib import Path
 
+def make_sample_id(real_path: str | Path, real_root: str | Path) -> str:
+    """
+    用 real_path 相对 real_root 的路径生成稳定 sample_id
+    不随机器路径变化，适用于 Windows/Linux
 
-def make_sample_id(filename: str) -> str:
+    例:
+      real_root = data/real
+      real_path = data/real/其他/abc.png
+      -> sample_id = "abc_1a2b3c4d"
     """
-    用文件名生成稳定 sample_id
-    例如: "abc.png" -> "abc_1a2b3c4d"
-    """
-    stem = filename.rsplit(".", 1)[0]
-    h = hashlib.md5(filename.encode("utf-8")).hexdigest()[:8]
+    real_path = Path(real_path)
+    real_root = Path(real_root)
+
+    rel = real_path.relative_to(real_root).as_posix()  # 统一成 / 分隔
+    stem = real_path.stem  # abc（不含后缀）
+    h = hashlib.md5(rel.encode("utf-8")).hexdigest()[:8]
     return f"{stem}_{h}"

@@ -1,16 +1,73 @@
-pip install -r requirements.txt# 深度学习框架
-torch>=2.0.0
-torchvision>=0.15.0
+# ============================================================
+# Paper Figure Forgery Dataset - Requirements
+# 论文图像伪造数据集生成项目 - 依赖包列表
+# ============================================================
+# Usage:
+#   1) Install PyTorch first (match your CUDA version)
+#   2) pip install -r requirements.txt
+# ============================================================
 
-# 图像处理
-opencv-python>=4.8.0
+# ------------------------------------------------------------
+# Core Scientific Computing
+# ------------------------------------------------------------
 numpy>=1.24.0
+scipy>=1.10.0
+
+# ------------------------------------------------------------
+# Computer Vision & Image Processing
+# ------------------------------------------------------------
+opencv-python>=4.8.0
 Pillow>=10.0.0
+imageio>=2.31.0
 
-# Segment Anything Model
-git+https://github.com/facebookresearch/segment-anything.git
-
-# 其他工具
-matplotlib>=3.7.0
+# ------------------------------------------------------------
+# Configuration & Utilities
+# ------------------------------------------------------------
+PyYAML>=6.0
 tqdm>=4.65.0
 
+# ------------------------------------------------------------
+# Metadata / Logging Helpers (recommended)
+# ------------------------------------------------------------
+# Useful for safer version handling & environment consistency
+packaging>=23.0
+
+# ------------------------------------------------------------
+# API Integration
+# ------------------------------------------------------------
+requests>=2.31.0
+PyJWT>=2.8.0
+
+# ------------------------------------------------------------
+# Visualization (optional but useful)
+# ------------------------------------------------------------
+matplotlib>=3.7.0
+
+# ------------------------------------------------------------
+# Segment Anything Model (SAM)
+# ------------------------------------------------------------
+# Install SAM from GitHub.
+# Tip: pin to a commit for reproducibility if needed.
+git+https://github.com/facebookresearch/segment-anything.git
+
+# ------------------------------------------------------------
+# RePaint / Diffusion (common runtime deps)
+# ------------------------------------------------------------
+blobfile>=2.0.0
+
+# ============================================================
+# IMPORTANT NOTES
+# ============================================================
+# 1) DO NOT install torch/torchvision here.
+#    Install manually based on your CUDA version, e.g.:
+#
+#    CUDA 11.8:
+#      pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+#
+#    CUDA 12.1:
+#      pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#
+# 2) Verify:
+#    python -c "import torch; print(torch.cuda.is_available())"
+#    python -c "import cv2; import segment_anything; print('OK')"
+# ============================================================

@@ -10,16 +10,23 @@ venv/
 .vscode/
 .idea/
 
-# logs
-logs
 
-# Dataset (不要上传)
+# Dataset 
 data/
 meta/
 .env/
-# Model checkpoints (不要上传)
 checkpoints/
+logs
 
 # External heavy outputs
 external/RePaint-main/results/
 external/RePaint-main/logs/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+
+# ===== misc =====
+*.tgz
+*.tar
+*.zip

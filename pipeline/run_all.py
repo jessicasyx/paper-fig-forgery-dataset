@@ -28,6 +28,7 @@ from pipeline.generators.sam_masker import get_default_sam_config, initialize_sa
 from pipeline.generators.repaint_wrapper import run_repaint_batch
 from pipeline.utils.ids import make_sample_id
 from pipeline.utils.meta_writer import write_meta, write_failed
+from pipeline.utils.qa import eval_mask_qa,eval_fake_qa
 
 # ---------------------------------------------------------
 # 小工具：列出 real_dir 里的图片
@@ -127,7 +128,7 @@ def main():
     print(f"mask 缺失数量：{len(missing_masks)}")
     print(f"是否需要生成mask：{need_make_mask}")
 
-        # ---------------------------------------------------------
+    # ---------------------------------------------------------
     # Step 1：生成 mask（SAM） + 记录跳过
     # ---------------------------------------------------------
     print("\n步骤1：mask 处理（SAM，可选）")
@@ -136,20 +137,32 @@ def main():
     config = get_default_sam_config()
     model_type = config["model_type"]
 
+    # 合格样本列表（通过 QA 的样本）
+    valid_imgs = []
+
     # ✅ 1) 先把“已存在的mask跳过”全部写入meta（否则永远漏账）
     if not args.overwrite:
         for img_path in tqdm(imgs, desc="记录mask跳过", unit="张"):
             out_mask = os.path.join(mask_dir, img_path.stem + ".png")
             if os.path.exists(out_mask):
                 sample_id = make_sample_id(img_path, real_dir)
+
+                # 先做 Mask QA
+                mask_qa = eval_mask_qa(out_mask)
+
+                # 记录 mask 跳过的同时也记录 QA
                 write_meta(
                     sample_id=sample_id,
                     stage="mask",
                     status="skip",
                     type="repaint",
                     paths={"real": str(img_path), "mask": out_mask},
-                    params={"model_type": model_type}
+                    params={"model_type": model_type},
+                    qa={"mask_qa": mask_qa}
                 )
+                # ✅ 如果 Mask QA 通过，也要加入 valid_imgs
+                if mask_qa["pass"]:
+                    valid_imgs.append(img_path)
 
     # ✅ 2) 再决定要不要生成缺失的mask
     if need_make_mask:
@@ -190,14 +203,23 @@ def main():
 
             if ok:
                 ok_cnt += 1
+
+                # 在 mask 生成后立即进行 QA
+                mask_qa = eval_mask_qa(out_mask)
+
                 write_meta(
                     sample_id=sample_id,
                     stage="mask",
                     status="success",
                     type="repaint",
                     paths={"real": str(img_path), "mask": out_mask},
-                    params={"model_type": model_type}
+                    params={"model_type": model_type},
+                    qa={"mask_qa": mask_qa}  # 将 mask_qa 写入 meta
                 )
+
+                # 如果 Mask QA 通过，加入合格名单
+                if mask_qa["pass"]:
+                    valid_imgs.append(img_path)
             else:
                 fail_cnt += 1
                 tqdm.write(f"生成mask失败：{img_path.name} | {msg}")
@@ -212,23 +234,22 @@ def main():
                 )
 
         print(f"mask 生成完成：新生成 {ok_cnt}，失败 {fail_cnt}")
-
-    else:
-        print("\n步骤1：跳过 mask 生成（mask 已齐全）")
-
     # ---------------------------------------------------------
     # Step 2：生成 corrupted（挖洞图）
     # ---------------------------------------------------------
     print("\n步骤2：生成 corrupted（挖洞图）")
+    print(f"合格图片数量（通过 Mask QA）：{len(valid_imgs)}")
+    
     ok_cnt, skip_cnt, fail_cnt = 0, 0, 0
 
     # ✅ 给 Step3 repaint 批量用
     repaint_todo = []
 
-    for img_path in tqdm(imgs, desc="生成corrupted", unit="张"):
+    # ✅ 只处理通过 Mask QA 的合格图片
+    for img_path in tqdm(valid_imgs, desc="生成corrupted", unit="张"):
         name = img_path.name
         real_path = os.path.join(real_dir, name)
-        mask_path = os.path.join(mask_dir, name)  # 注意：mask 文件名与你 real 保持一致
+        mask_path = os.path.join(mask_dir, img_path.stem + ".png")
         out_path = os.path.join(corrupted_dir, name)
         # ✅ 每张图一个 sample_id
         sample_id = make_sample_id(img_path, real_dir)
@@ -386,6 +407,26 @@ def main():
                     "max_len": args.max_len
                 }
             )
+            # ✅ fakeQA（注意 eval_fake_qa 需要有 pass 字段）
+            fake_qa = eval_fake_qa(item["real"], fake_path)
+            write_meta(
+            sample_id=item["sample_id"],
+            stage="qa",
+            status="success",
+            type="repaint",
+            paths={
+                "real": item["real"],
+                "mask": item["mask"],
+                "corrupted": item["corrupted"],
+                "fake": fake_path
+            },
+            params={},
+            qa={"fake_qa": fake_qa}   # mask_qa 不用重复算
+            )
+            
+        
+            
+
         else:
             fail_cnt += 1
             write_failed(

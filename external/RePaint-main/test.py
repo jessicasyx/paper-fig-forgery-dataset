@@ -117,9 +117,10 @@ def main(conf: conf_mgt.Default_Conf):
     print("Start", conf['name'])
 
     # ==================== 步骤1: 获取计算设备 ====================
-    # 自动选择 GPU（如果可用）或 CPU
-    device = dist_util.dev(conf.get('device'))
-
+    # 选择 GPU
+    import torch
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    #本地用0 a40自己查nvtop
 
     # ==================== 步骤2: 创建并加载扩散模型 ====================
     # 根据配置创建 UNet 模型和扩散过程对象

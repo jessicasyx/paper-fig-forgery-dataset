@@ -78,15 +78,15 @@ def select_best_mask(masks: List[Dict], image_area: int) -> Optional[Dict]:
     for m in masks:
         m["area_ratio"] = m["area"] / max(image_area, 1)
 
-    # 优先：10%~30%
-    optimal = [m for m in masks if 0.10 <= m["area_ratio"] <= 0.30]
+    # 优先：5%~20%，目标中心值为12.5%
+    optimal = [m for m in masks if 0.05 <= m["area_ratio"] <= 0.20]
     if optimal:
-        return min(optimal, key=lambda m: abs(m["area_ratio"] - 0.20))
+        return min(optimal, key=lambda m: abs(m["area_ratio"] - 0.125))
 
-    # 退一步：5%~40%
-    acceptable = [m for m in masks if 0.05 <= m["area_ratio"] <= 0.40]
+    # 退一步：2%~40%，目标中心值为21%
+    acceptable = [m for m in masks if 0.02 <= m["area_ratio"] <= 0.40]
     if acceptable:
-        return min(acceptable, key=lambda m: abs(m["area_ratio"] - 0.20))
+        return min(acceptable, key=lambda m: abs(m["area_ratio"] - 0.21))
 
     # 再退：面积第二大
     if len(masks) >= 2:

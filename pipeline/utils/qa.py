@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-def eval_mask_qa(mask_path:str, min_ratio=0.05, max_ratio=0.20, max_edge=0.10) -> dict:
+def eval_mask_qa(mask_path:str, min_ratio=0.02, max_ratio=0.20, max_edge=0.10) -> dict:
     """
     评估 mask 区域的质量，返回评估结果（占比、边界一致性评分）。
     """

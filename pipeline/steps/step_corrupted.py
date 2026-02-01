@@ -44,9 +44,6 @@ def run_step_corrupted(
       (ok, err_msg)
     """
     try:
-        if (not overwrite) and os.path.exists(corrupted_path):
-            return True, "exists_skip"
-
         if not os.path.exists(real_path):
             return False, "real_not_found"
 

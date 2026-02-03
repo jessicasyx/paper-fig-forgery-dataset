@@ -88,6 +88,9 @@ def run_repaint_batch(
     cmd = ["python", "test.py", "--conf_path", tmp_conf]
     env = os.environ.copy()
 
+    # GPU 设置
+    env["CUDA_VISIBLE_DEVICES"] = "0"
+
     # Windows 编码保险（防止中文/符号输出导致问题）
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"

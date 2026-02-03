@@ -65,10 +65,14 @@ REPAINT_CONFIG = {
 # ============================================================
 COPYMOVE_CONFIG = {
     "samples_per_image": 4,
-    "feather_width": 5,
+    "feather_width": 15,  # 增大羽化宽度，使边缘更平滑（原5->15）
     "jpeg_quality": 85,
     "brightness_alpha": 1.05,
     "brightness_beta": 10,
+    "use_poisson_blending": True,  # 启用泊松融合
+    "use_color_match": True,  # 启用颜色匹配
+    "add_noise": True,  # 添加轻微噪声
+    "noise_strength": 1.5,  # 噪声强度
 }
 
 # ============================================================

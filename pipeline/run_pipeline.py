@@ -10,7 +10,7 @@
     python pipeline/run_pipeline.py --type repaint --no-skip-existing
 
     # Copy-Move 流程
-    python pipeline/run_pipeline.py --type copymove --samples-per-image 4
+    python pipeline/run_pipeline.py --type copymove --samples-per-image 1
 """
 
 import os

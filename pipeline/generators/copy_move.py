@@ -21,6 +21,56 @@ def simulate_jpeg_compression(image, quality=50):
     
     return decoded_image
 
+def match_color_histogram(source, target, mask):
+    """
+    使用直方图匹配调整源区域的颜色，使其与目标区域更匹配
+    :param source: 源图像
+    :param target: 目标区域图像
+    :param mask: 掩码（用于确定有效区域）
+    :return: 颜色匹配后的源图像
+    """
+    result = source.copy()
+    
+    # 对每个颜色通道进行直方图匹配
+    for i in range(3):
+        # 计算源和目标的直方图
+        source_hist, _ = np.histogram(source[:, :, i].flatten(), 256, [0, 256])
+        target_hist, _ = np.histogram(target[:, :, i].flatten(), 256, [0, 256])
+        
+        # 计算累积分布函数
+        source_cdf = source_hist.cumsum()
+        target_cdf = target_hist.cumsum()
+        
+        # 归一化
+        source_cdf = source_cdf / source_cdf[-1]
+        target_cdf = target_cdf / target_cdf[-1]
+        
+        # 创建查找表
+        lookup_table = np.zeros(256, dtype=np.uint8)
+        g_j = 0
+        for g_i in range(256):
+            while g_j < 255 and target_cdf[g_j] < source_cdf[g_i]:
+                g_j += 1
+            lookup_table[g_i] = g_j
+        
+        # 应用查找表
+        result[:, :, i] = cv2.LUT(source[:, :, i], lookup_table)
+    
+    return result
+
+
+def add_subtle_noise(image, strength=2):
+    """
+    添加轻微的噪声，使图像看起来更自然
+    :param image: 输入图像
+    :param strength: 噪声强度（1-10）
+    :return: 添加噪声后的图像
+    """
+    noise = np.random.normal(0, strength, image.shape).astype(np.float32)
+    noisy_image = np.clip(image.astype(np.float32) + noise, 0, 255).astype(np.uint8)
+    return noisy_image
+
+
 def extract_object_from_mask(image, mask):
     """
     从 mask 中提取对象区域
@@ -73,14 +123,15 @@ def find_valid_paste_location(image_shape, object_size, source_bbox, margin=20):
     
     return None
 
-def paste_object_with_mask(image, object_img, object_mask, target_pos, feather_width=5):
+def paste_object_with_mask(image, object_img, object_mask, target_pos, feather_width=15, use_color_match=True):
     """
-    将对象粘贴到目标位置，使用 mask 进行混合
+    将对象粘贴到目标位置，使用 mask 进行混合（改进版：更自然的边缘）
     :param image: 原始图像
     :param object_img: 对象图像
     :param object_mask: 对象 mask
     :param target_pos: 目标位置 (x, y)
-    :param feather_width: 羽化宽度
+    :param feather_width: 羽化宽度（增大默认值以获得更平滑的过渡）
+    :param use_color_match: 是否使用颜色匹配
     :return: 粘贴后的图像
     """
     result = image.copy()
@@ -98,7 +149,16 @@ def paste_object_with_mask(image, object_img, object_mask, target_pos, feather_w
         object_img = object_img[:, :w]
         object_mask = object_mask[:, :w]
     
-    # 羽化 mask
+    target_region = result[ty:ty+h, tx:tx+w]
+    
+    # 改进1：颜色匹配（使复制的对象颜色与目标区域更协调）
+    if use_color_match and h > 5 and w > 5:
+        try:
+            object_img = match_color_histogram(object_img, target_region, object_mask)
+        except:
+            pass  # 如果颜色匹配失败，继续使用原始颜色
+    
+    # 改进2：使用距离变换的羽化（更自然的渐变）
     feathered_mask = feathered_edge_mask(object_mask, feather_width)
     
     # 归一化 mask 到 [0, 1]
@@ -106,10 +166,31 @@ def paste_object_with_mask(image, object_img, object_mask, target_pos, feather_w
     if len(mask_normalized.shape) == 2:
         mask_normalized = np.expand_dims(mask_normalized, axis=2)
     
-    # 混合
-    target_region = result[ty:ty+h, tx:tx+w]
-    blended = (object_img * mask_normalized + target_region * (1 - mask_normalized)).astype(np.uint8)
-    result[ty:ty+h, tx:tx+w] = blended
+    # 改进3：泊松融合（Poisson Blending）- 更自然的颜色过渡
+    # 尝试使用泊松融合（如果mask足够大）
+    if h > 10 and w > 10 and np.sum(object_mask > 127) > 100:
+        try:
+            # 创建中心点
+            center = (tx + w // 2, ty + h // 2)
+            
+            # 使用 seamlessClone 进行泊松融合
+            # NORMAL_CLONE: 保留源纹理
+            # MIXED_CLONE: 混合源和目标纹理（更自然）
+            result = cv2.seamlessClone(
+                object_img, 
+                result, 
+                object_mask, 
+                center, 
+                cv2.MIXED_CLONE
+            )
+        except:
+            # 如果泊松融合失败，回退到普通混合
+            blended = (object_img * mask_normalized + target_region * (1 - mask_normalized)).astype(np.uint8)
+            result[ty:ty+h, tx:tx+w] = blended
+    else:
+        # 对于小区域，使用改进的alpha混合
+        blended = (object_img * mask_normalized + target_region * (1 - mask_normalized)).astype(np.uint8)
+        result[ty:ty+h, tx:tx+w] = blended
     
     return result
 
@@ -163,15 +244,15 @@ def load_or_generate_mask(real_image, image_name, checkpoint_path, mask_dir, mod
     
     return mask
 
-def generate_fake_images_from_real(real_image, checkpoint_path, num_samples=10, region_size=(50, 50), model_type="vit_l", feather_width=5, image_name=None, mask_dir=None):
+def generate_fake_images_from_real(real_image, checkpoint_path, num_samples=10, region_size=(50, 50), model_type="vit_l", feather_width=15, image_name=None, mask_dir=None):
     """
-    从真实图像生成伪造图像（Copy-Move）
+    从真实图像生成伪造图像（Copy-Move）- 改进版
     :param real_image: 输入图像
     :param checkpoint_path: SAM 模型检查点路径
     :param num_samples: 伪造图像的数量
     :param region_size: 未使用（保留兼容性）
     :param model_type: 模型类型（vit_b, vit_l, vit_h）
-    :param feather_width: 羽化宽度
+    :param feather_width: 羽化宽度（默认15，更大的值产生更平滑的边缘）
     :param image_name: 图像文件名（用于 mask 缓存）
     :param mask_dir: mask 存储目录
     :return: 生成的伪造图像列表
@@ -210,14 +291,29 @@ def generate_fake_images_from_real(real_image, checkpoint_path, num_samples=10, 
             print(f"    样本 {i+1}: 无法找到有效粘贴位置，跳过")
             continue
         
-        # 4. 粘贴对象到目标位置
-        fake_image = paste_object_with_mask(real_image, object_img, object_mask, target_pos, feather_width)
+        # 4. 粘贴对象到目标位置（使用改进的融合方法）
+        fake_image = paste_object_with_mask(
+            real_image, 
+            object_img, 
+            object_mask, 
+            target_pos, 
+            feather_width=feather_width,
+            use_color_match=True  # 启用颜色匹配
+        )
         
-        # 5. 调整亮度和对比度（轻微变化）
-        fake_image = adjust_brightness_contrast(fake_image, alpha=1.05, beta=10)
+        # 5. 添加轻微噪声（使图像更自然）
+        fake_image = add_subtle_noise(fake_image, strength=1.5)
         
-        # 6. 模拟 JPEG 压缩
-        compressed_fake_image = simulate_jpeg_compression(fake_image, quality=85)
+        # 6. 调整亮度和对比度（轻微变化）
+        # 随机化参数，使每张图片略有不同
+        alpha = np.random.uniform(0.98, 1.08)  # 对比度
+        beta = np.random.randint(-5, 15)  # 亮度
+        fake_image = adjust_brightness_contrast(fake_image, alpha=alpha, beta=beta)
+        
+        # 7. 模拟 JPEG 压缩
+        # 使用稍高的质量以保留更多细节
+        quality = np.random.randint(80, 95)
+        compressed_fake_image = simulate_jpeg_compression(fake_image, quality=quality)
         
         fake_images.append(compressed_fake_image)
     

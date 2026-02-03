@@ -71,8 +71,19 @@ def feathered_edge_mask(mask, feather_width=5):
     :param feather_width: 羽化宽度（像素）
     :return: 羽化后的掩码
     """
-    # 使用高斯模糊进行羽化
-    feathered = cv2.GaussianBlur(mask, (feather_width * 2 + 1, feather_width * 2 + 1), 0)
+    # 方法1：距离变换 + 归一化（更自然的渐变）
+    # 将mask转为二值图
+    _, binary_mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+    
+    # 计算距离变换（从边缘到内部的距离）
+    dist_transform = cv2.distanceTransform(binary_mask, cv2.DIST_L2, 5)
+    
+    # 归一化到 [0, 255]，并限制羽化范围
+    feathered = np.clip(dist_transform / feather_width * 255, 0, 255).astype(np.uint8)
+    
+    # 再用轻微的高斯模糊使过渡更平滑
+    feathered = cv2.GaussianBlur(feathered, (feather_width * 2 + 1, feather_width * 2 + 1), 0)
+    
     return feathered
 
 def paste_source_to_target(image, source_region, target_coordinates, feathered_mask):

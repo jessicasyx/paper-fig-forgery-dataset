@@ -30,3 +30,6 @@ Thumbs.db
 *.tgz
 *.tar
 *.zip
+*.gz 
+*.tar.gz
+*.7z
